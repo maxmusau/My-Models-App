@@ -1,0 +1,23 @@
+{
+  "name": "model_app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "serve": "tsx src/app/server.ts",
+    "cli": "tsx src/app/cli.ts",
+    "test:sol": "docker run --rm -v \"%cd%/solidity:/work\" -w /work ghcr.io/foundry-rs/foundry:latest \"forge test\"",
+    "diff:gen": "tsx scripts/gen-differential.ts",
+    "test:all": "npm test && npm run test:sol"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "fast-check": "^4.10.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

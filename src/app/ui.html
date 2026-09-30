@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>model_app</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #667085; --line: #e3e6eb;
+    --accent: #3b5bdb; --accent-text: #ffffff; --ok: #1a7f4b; --err: #c92a2a; --chip: #eef1ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --panel: #1c1f25; --text: #e7e9ee; --muted: #9aa3b2; --line: #2c313a;
+      --accent: #748ffc; --accent-text: #0f1220; --ok: #51cf66; --err: #ff8787; --chip: #262b3d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; padding: 12px 20px;
+           background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 16px; margin: 0; }
+  header label { color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; padding: 16px 20px; max-width: 1300px; margin: 0 auto; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  section h2 { font-size: 13px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 5px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); font-style: italic; }
+  .chip { display: inline-block; background: var(--chip); border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+  input, select, button { font: inherit; color: inherit; }
+  input, select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+  button { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button:hover { filter: brightness(1.08); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .tabs button { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  .tabs button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  form { display: grid; gap: 8px; }
+  form .row { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; }
+  form .row span { color: var(--muted); }
+  form small { color: var(--muted); }
+  #log { max-height: 260px; overflow: auto; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+  #log div { padding: 2px 0; border-bottom: 1px dashed var(--line); word-break: break-all; }
+  .ok { color: var(--ok); } .err { color: var(--err); }
+  .wide { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>model_app</h1>
+  <label>Acting as <select id="caller"></select></label>
+  <label>Custom <input id="custom" placeholder="name" size="8"></label>
+  <span class="chip" id="clock">time</span>
+  <button class="ghost" data-adv="60">+1 min</button>
+  <button class="ghost" data-adv="3600">+1 hour</button>
+  <button id="demo">Load demo</button>
+</header>
+
+<main>
+  <section>
+    <h2>Fungible token <span id="ftname" class="chip"></span></h2>
+    <table id="balances"></table>
+    <p>Total supply: <b id="supply">0</b> · marketplace fee <b id="fee"></b></p>
+  </section>
+
+  <section>
+    <h2>NFTs</h2>
+    <table id="nfts"></table>
+  </section>
+
+  <section>
+    <h2>Fixed-price listings</h2>
+    <table id="listings"></table>
+  </section>
+
+  <section>
+    <h2>Auctions</h2>
+    <table id="auctions"></table>
+  </section>
+
+  <section class="wide">
+    <h2>Do something</h2>
+    <div class="tabs" id="tabs"></div>
+    <form id="form"></form>
+  </section>
+
+  <section class="wide">
+    <h2>Activity</h2>
+    <div id="log"></div>
+  </section>
+</main>
+
+<script>
+const ACTORS = ["admin", "alice", "bob", "carol", "dave", "artist", "treasury", "market"];
+
+// Every action the UI can perform. `route` = /<group>/<action>; fields become the JSON body.
+const ACTIONS = {
+  FT: [
+    { route: "ft/mint", label: "Mint (admin)", fields: ["to", "amount"] },
+    { route: "ft/transfer", label: "Transfer", fields: ["to", "amount"] },
+    { route: "ft/approve", label: "Approve spender", fields: ["spender", "amount"], hint: 'Give "market" an allowance before buying or bidding.' },
+    { route: "ft/burn", label: "Burn", fields: ["amount"] },
+  ],
+  NFT: [
+    { route: "nft/mint", label: "Mint (admin)", fields: ["to", "id", "uri", "royaltyReceiver", "royaltyBps"], hint: "Royalty is optional; 500 bps = 5%, max 1000." },
+    { route: "nft/transfer", label: "Transfer", fields: ["from", "to", "id"] },
+    { route: "nft/approve", label: "Approve one token", fields: ["spender", "id"], hint: 'Approve "market" before listing or auctioning.' },
+    { route: "nft/approveAll", label: "Approve all", fields: ["operator"] },
+    { route: "nft/burn", label: "Burn", fields: ["id"] },
+  ],
+  Market: [
+    { route: "market/list", label: "List for sale", fields: ["id", "price"] },
+    { route: "market/buy", label: "Buy", fields: ["id"] },
+    { route: "market/cancel", label: "Cancel listing", fields: ["id"] },
+  ],
+  Auction: [
+    { route: "market/createAuction", label: "Start auction", fields: ["id", "reserve", "duration"], hint: "Duration in seconds." },
+    { route: "market/bid", label: "Bid", fields: ["id", "amount"] },
+    { route: "market/settle", label: "Settle", fields: ["id"], hint: "Anyone can settle after the end time." },
+    { route: "market/cancelAuction", label: "Cancel auction", fields: ["id"], hint: "Only before the first bid." },
+  ],
+};
+
+const $ = (id) => document.getElementById(id);
+let tab = "FT", actionIdx = 0, snapshot = null;
+
+function caller() { return $("custom").value.trim() || $("caller").value; }
+
+function cell(tag, text, cls) {
+  const el = document.createElement(tag);
+  el.textContent = text;
+  if (cls) el.className = cls;
+  return el;
+}
+
+function fill(table, head, rows, emptyText) {
+  table.replaceChildren();
+  if (!rows.length) {
+    const tr = table.insertRow();
+    const td = tr.insertCell();
+    td.colSpan = head.length;
+    td.className = "empty";
+    td.textContent = emptyText;
+    return;
+  }
+  const hr = table.insertRow();
+  const numeric = (h) => h === "Amount" || h === "Price" || h === "Bid" || h === "Reserve";
+  head.forEach((h) => hr.appendChild(cell("th", h, numeric(h) ? "num" : "")));
+  rows.forEach((r) => {
+    const tr = table.insertRow();
+    r.forEach((v, i) => tr.appendChild(cell("td", v, numeric(head[i]) ? "num" : "")));
+  });
+}
+
+function render(s) {
+  snapshot = s;
+  $("ftname").textContent = s.ft.symbol;
+  $("supply").textContent = s.ft.supply;
+  $("fee").textContent = (s.feeBps / 100) + "%";
+  $("clock").textContent = "t = " + s.now;
+  fill($("balances"), ["Holder", "Amount"], Object.entries(s.ft.balances), "No balances yet. Mint some as admin.");
+  fill($("nfts"), ["ID", "Owner", "Royalty", "Approved"],
+    s.nfts.map((n) => ["#" + n.id, n.owner, n.royalty ? n.royalty.receiver + " " + n.royalty.bps / 100 + "%" : "—", n.approved || "—"]),
+    "No NFTs yet.");
+  fill($("listings"), ["NFT", "Seller", "Price"], s.listings.map((l) => ["#" + l.id, l.seller, l.price]), "Nothing listed.");
+  fill($("auctions"), ["NFT", "Seller", "Reserve", "Bid", "Ends in"],
+    s.auctions.map((a) => ["#" + a.id, a.seller, a.reserve, a.highBidder ? a.highBid + " (" + a.highBidder + ")" : "—",
+      a.endsAt - s.now > 0 ? (a.endsAt - s.now) + "s" : "ended — settle it"]),
+    "No auctions.");
+}
+
+async function call(method, path, body, who) {
+  const res = await fetch(path, {
+    method,
+    headers: { "x-caller": who ?? caller(), "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+function log(who, route, args, r) {
+  const d = document.createElement("div");
+  const ok = r.status === 200;
+  d.appendChild(cell("span", ok ? "✔ " : "✘ ", ok ? "ok" : "err"));
+  d.appendChild(document.createTextNode(`${who} ${route} ${JSON.stringify(args)} → ${JSON.stringify(r.body)}`));
+  $("log").prepend(d);
+}
+
+async function refresh() {
+  const r = await call("GET", "/state/snapshot", undefined, "ui");
+  if (r.status === 200) render(r.body);
+}
+
+async function act(route, args, who) {
+  who = who ?? caller();
+  const r = await call("POST", "/" + route, args, who);
+  log(who, route, args, r);
+  await refresh();
+  return r;
+}
+
+function buildArgs(route, raw) {
+  const a = {};
+  for (const [k, v] of Object.entries(raw)) if (v !== "") a[k] = v;
+  if (route === "market/createAuction" && a.duration !== undefined) a.duration = Number(a.duration);
+  if (route === "nft/approveAll") a.approved = true;
+  if (route === "nft/mint" && a.royaltyReceiver) {
+    a.royalty = { receiver: a.royaltyReceiver, bps: Number(a.royaltyBps || 0) };
+  }
+  delete a.royaltyReceiver; delete a.royaltyBps;
+  return a;
+}
+
+function renderForm() {
+  const act_ = ACTIONS[tab][actionIdx];
+  const form = $("form");
+  form.replaceChildren();
+  const sel = document.createElement("select");
+  ACTIONS[tab].forEach((a, i) => sel.add(new Option(a.label, i)));
+  sel.value = actionIdx;
+  sel.onchange = () => { actionIdx = Number(sel.value); renderForm(); };
+  form.appendChild(sel);
+  const inputs = {};
+  act_.fields.forEach((f) => {
+    const row = document.createElement("label");
+    row.className = "row";
+    row.appendChild(cell("span", f));
+    const inp = document.createElement("input");
+    inp.name = f;
+    inputs[f] = inp;
+    row.appendChild(inp);
+    form.appendChild(row);
+  });
+  if (act_.hint) form.appendChild(cell("small", act_.hint));
+  const btn = cell("button", "Run as " + caller());
+  btn.type = "submit";
+  form.appendChild(btn);
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const raw = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value.trim()]));
+    act(act_.route, buildArgs(act_.route, raw));
+  };
+}
+
+function renderTabs() {
+  const t = $("tabs");
+  t.replaceChildren();
+  Object.keys(ACTIONS).forEach((name) => {
+    const b = cell("button", name, name === tab ? "on" : "");
+    b.type = "button";
+    b.onclick = () => { tab = name; actionIdx = 0; renderTabs(); renderForm(); };
+    t.appendChild(b);
+  });
+}
+
+// A scripted walk through everything: handy for a first look.
+async function demo() {
+  const steps = [
+    ["admin", "ft/mint", { to: "bob", amount: "5000" }],
+    ["admin", "ft/mint", { to: "carol", amount: "5000" }],
+    ["admin", "nft/mint", { to: "alice", id: String(Date.now() % 100000), uri: "ipfs://demo", royalty: { receiver: "artist", bps: 500 } }],
+  ];
+  for (const [who, route, args] of steps) await act(route, args, who);
+  const id = steps[2][2].id;
+  await act("ft/approve", { spender: "market", amount: "5000" }, "bob");
+  await act("ft/approve", { spender: "market", amount: "5000" }, "carol");
+  await act("nft/approve", { spender: "market", id }, "alice");
+  await act("market/createAuction", { id, reserve: "100", duration: 600 }, "alice");
+  await act("market/bid", { id, amount: "300" }, "bob");
+  await act("market/bid", { id, amount: "900" }, "carol");
+  log("ui", "demo", {}, { status: 200, body: "Now use “+1 hour”, then Settle the auction as anyone." });
+}
+
+ACTORS.forEach((a) => $("caller").add(new Option(a, a)));
+$("caller").value = "admin";
+$("caller").onchange = $("custom").oninput = renderForm;
+document.querySelectorAll("[data-adv]").forEach((b) => {
+  b.onclick = () => act("time/advance", { seconds: Number(b.dataset.adv) }, "admin");
+});
+$("demo").onclick = demo;
+renderTabs(); renderForm(); refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

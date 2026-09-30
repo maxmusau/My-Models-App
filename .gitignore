@@ -1,0 +1,4 @@
+node_modules
+solidity/cache
+solidity/out
+*.db
